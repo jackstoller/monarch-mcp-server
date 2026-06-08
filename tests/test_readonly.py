@@ -9,6 +9,34 @@ import monarch_mcp_server.security as security
 from monarch_mcp_server.security import WriteScopeRequired, write_tool
 
 
+# Regression guard for the security audit (C1/C2): tools that mutate server or
+# Monarch state must be on the WRITE path, so they are unregistered under the
+# default READ_ONLY=true and otherwise require monarch:write. If someone adds a
+# mutating tool with a bare @mcp.tool(), this test should start failing once the
+# tool name is added here.
+MUST_BE_WRITE_GATED = {
+    # session/auth state mutations
+    "monarch_login",
+    "monarch_login_with_token",
+    "monarch_logout",
+    # institution-side mutation / amplification
+    "refresh_accounts",
+    # representative data mutations
+    "set_budget_amount",
+    "create_transaction",
+    "delete_transaction",
+}
+
+
+def test_mutating_tools_unregistered_in_read_only():
+    """With the default READ_ONLY=true, no mutating tool is exposed."""
+    import monarch_mcp_server.app as app
+
+    registered = {t.name for t in app.mcp._tool_manager.list_tools()}
+    leaked = MUST_BE_WRITE_GATED & registered
+    assert not leaked, f"mutating tools exposed on the read path: {sorted(leaked)}"
+
+
 @pytest.fixture
 def fake_mcp(monkeypatch):
     """Replace the real FastMCP so registration is observable and isolated."""

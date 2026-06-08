@@ -36,17 +36,25 @@ class RateLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Prefer the proxy-forwarded client IP (TLS terminates upstream).
-        forwarded = request.headers.get("x-forwarded-for")
-        client_ip = (
-            forwarded.split(",")[0].strip()
-            if forwarded
-            else (request.client.host if request.client else "unknown")
-        )
+        # Identify the client. We deliberately do NOT trust X-Forwarded-For:
+        # it is client-settable and nginx appends to it, so the leftmost value
+        # is spoofable and would let an attacker mint a fresh bucket per request.
+        # CF-Connecting-IP is set (and overwritten) by Cloudflare, which fronts
+        # all public traffic, so it cannot be forged by the client. Fall back to
+        # the immediate peer when present (direct/local access).
+        client_ip = request.headers.get("cf-connecting-ip")
+        if not client_ip:
+            client_ip = request.client.host if request.client else "unknown"
 
         now_window = int(time.time() // 60)
         if now_window != self._window:
             self._window = now_window
+            self._counts.clear()
+
+        # Bound memory: if a window accrues an absurd number of distinct keys
+        # (e.g. someone reaching the origin directly with varied peers), reset
+        # rather than grow unbounded.
+        if len(self._counts) > 100_000:
             self._counts.clear()
 
         self._counts[client_ip] += 1

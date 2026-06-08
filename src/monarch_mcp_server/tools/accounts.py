@@ -51,7 +51,7 @@ async def get_accounts() -> str:
         return json_error("get_accounts", e)
 
 
-@mcp.tool()
+@write_tool()
 async def refresh_accounts(account_ids: Optional[List[str]] = None) -> str:
     """Request account data refresh from financial institutions.
 

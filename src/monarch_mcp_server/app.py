@@ -121,9 +121,12 @@ def _run_http() -> None:
         host=config.host,
         port=config.port,
         log_level="info",
-        # Honour X-Forwarded-* from the TLS-terminating proxy.
-        proxy_headers=True,
-        forwarded_allow_ips="*",
+        # Do NOT trust client-settable X-Forwarded-* headers. Nothing in the
+        # auth path depends on the request scheme (metadata/WWW-Authenticate use
+        # the configured PUBLIC_URL), and the rate limiter reads the
+        # Cloudflare-set CF-Connecting-IP directly, so trusting forwarded headers
+        # would only add a spoofing surface.
+        proxy_headers=False,
     )
 
 
