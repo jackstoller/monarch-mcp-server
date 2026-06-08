@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from gql import gql
 
 from monarch_mcp_server.app import mcp
+from monarch_mcp_server.security import write_tool
 from monarch_mcp_server.client import get_monarch_client
 from monarch_mcp_server.helpers import json_success, json_error
 
@@ -204,7 +205,7 @@ async def get_transaction_rules() -> str:
         return json_error("get_transaction_rules", e)
 
 
-@mcp.tool()
+@write_tool()
 async def create_transaction_rule(
     merchant_criteria_operator: Optional[str] = None,
     merchant_criteria_value: Optional[str] = None,
@@ -299,7 +300,7 @@ async def create_transaction_rule(
         return json_error("create_transaction_rule", e)
 
 
-@mcp.tool()
+@write_tool()
 async def update_transaction_rule(
     rule_id: str,
     merchant_criteria_operator: Optional[str] = None,
@@ -387,7 +388,7 @@ async def update_transaction_rule(
         return json_error("update_transaction_rule", e)
 
 
-@mcp.tool()
+@write_tool()
 async def delete_transaction_rule(rule_id: str) -> str:
     """
     Delete a transaction rule.

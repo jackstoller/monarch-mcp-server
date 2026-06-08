@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 from gql import gql
 
 from monarch_mcp_server.app import mcp
+from monarch_mcp_server.security import write_tool
 from monarch_mcp_server.client import get_monarch_client
 from monarch_mcp_server.helpers import json_success, json_error
 
@@ -51,7 +52,7 @@ async def get_transaction_category_groups() -> str:
         return json_error("get_transaction_category_groups", e)
 
 
-@mcp.tool()
+@write_tool()
 async def create_transaction_category(
     group_id: str,
     transaction_category_name: str,
@@ -213,7 +214,7 @@ _VALID_BUDGET_VARIABILITY = {"fixed", "flexible", "non_monthly"}
 _VALID_ROLLOVER_FREQUENCY = {"monthly", "variable"}
 
 
-@mcp.tool()
+@write_tool()
 async def update_category(
     category_id: str,
     name: Optional[str] = None,

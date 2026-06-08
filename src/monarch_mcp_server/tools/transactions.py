@@ -10,6 +10,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional
 
 from monarch_mcp_server.app import mcp
+from monarch_mcp_server.security import write_tool
 from monarch_mcp_server.client import get_monarch_client
 from monarch_mcp_server.helpers import (
     first_present,
@@ -622,7 +623,7 @@ async def get_transaction_details(transaction_id: str) -> str:
         return json_error("get_transaction_details", e)
 
 
-@mcp.tool()
+@write_tool()
 async def create_transaction(
     date: str,
     account_id: str,
@@ -666,7 +667,7 @@ async def create_transaction(
         return json_error("create_transaction", e)
 
 
-@mcp.tool()
+@write_tool()
 async def update_transaction(
     transaction_id: str,
     category_id: Optional[str] = None,
@@ -720,7 +721,7 @@ async def update_transaction(
         return json_error("update_transaction", e)
 
 
-@mcp.tool()
+@write_tool()
 async def categorize_transaction(transaction_id: str, category_id: str) -> str:
     """
     Assign a category to a transaction.
@@ -739,7 +740,7 @@ async def categorize_transaction(transaction_id: str, category_id: str) -> str:
         return json_error("categorize_transaction", e)
 
 
-@mcp.tool()
+@write_tool()
 async def update_transaction_notes(
     transaction_id: str,
     notes: str,
@@ -776,7 +777,7 @@ async def update_transaction_notes(
         return json_error("update_transaction_notes", e)
 
 
-@mcp.tool()
+@write_tool()
 async def mark_transaction_reviewed(transaction_id: str) -> str:
     """
     Mark a transaction as reviewed (clears the needs_review flag).
@@ -800,7 +801,7 @@ async def mark_transaction_reviewed(transaction_id: str) -> str:
         return json_error("mark_transaction_reviewed", e)
 
 
-@mcp.tool()
+@write_tool()
 async def bulk_categorize_transactions(
     transaction_ids: List[str],
     category_id: str,
@@ -872,7 +873,7 @@ async def bulk_categorize_transactions(
         return json_error("bulk_categorize_transactions", e)
 
 
-@mcp.tool()
+@write_tool()
 async def delete_transaction(transaction_id: str) -> str:
     """
     Delete a transaction from Monarch Money.

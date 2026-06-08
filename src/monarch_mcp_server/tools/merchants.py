@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 from gql import gql
 
 from monarch_mcp_server.app import mcp
+from monarch_mcp_server.security import write_tool
 from monarch_mcp_server.client import get_monarch_client
 from monarch_mcp_server.helpers import json_error, json_success
 
@@ -168,7 +169,7 @@ async def get_merchant(merchant_id: str) -> str:
         return json_error("get_merchant", e)
 
 
-@mcp.tool()
+@write_tool()
 async def update_merchant(
     merchant_id: str,
     name: Optional[str] = None,
@@ -278,7 +279,7 @@ async def update_merchant(
         return json_error("update_merchant", e)
 
 
-@mcp.tool()
+@write_tool()
 async def review_recurring_stream(
     stream_id: str,
     review_status: str,

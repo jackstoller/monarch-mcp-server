@@ -4,6 +4,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from monarch_mcp_server.app import mcp
+from monarch_mcp_server.security import write_tool
 from monarch_mcp_server.client import get_monarch_client
 from monarch_mcp_server.helpers import json_success, json_error
 
@@ -33,7 +34,7 @@ async def get_budgets(
         return json_error("get_budgets", e)
 
 
-@mcp.tool()
+@write_tool()
 async def set_budget_amount(
     amount: float,
     category_id: Optional[str] = None,
