@@ -26,10 +26,20 @@ from typing import Any, Callable
 
 from mcp.server.auth.middleware.auth_context import get_access_token
 
-from monarch_mcp_server.app import mcp
 from monarch_mcp_server.config import config
 
 logger = logging.getLogger(__name__)
+
+
+def _mcp():
+    """Lazily resolve the FastMCP instance.
+
+    Imported lazily (not at module top) to avoid a circular import: ``app``
+    imports the tool modules, which import this module.
+    """
+    from monarch_mcp_server.app import mcp
+
+    return mcp
 
 
 class WriteScopeRequired(Exception):
@@ -56,7 +66,7 @@ def _check_write_scope() -> None:
 
 def read_tool(*args: Any, **kwargs: Any) -> Callable[[Callable], Callable]:
     """Register a read-only tool. Thin alias for ``mcp.tool()`` for symmetry."""
-    return mcp.tool(*args, **kwargs)
+    return _mcp().tool(*args, **kwargs)
 
 
 def write_tool(*args: Any, **kwargs: Any) -> Callable[[Callable], Callable]:
@@ -79,6 +89,6 @@ def write_tool(*args: Any, **kwargs: Any) -> Callable[[Callable], Callable]:
         # Preserve the original signature so FastMCP builds the correct schema
         # (Context params, typed args) from the wrapped function.
         wrapper.__signature__ = inspect.signature(func)  # type: ignore[attr-defined]
-        return mcp.tool(*args, **kwargs)(wrapper)
+        return _mcp().tool(*args, **kwargs)(wrapper)
 
     return decorator
