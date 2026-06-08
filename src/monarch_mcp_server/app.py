@@ -30,7 +30,11 @@ load_dotenv()
 def _build_fastmcp() -> FastMCP:
     """Construct the FastMCP instance, wiring OAuth resource-server protection
     when the OAuth env vars are present."""
-    kwargs: dict = {"host": config.host, "port": config.port}
+    kwargs: dict = {
+        "host": config.host,
+        "port": config.port,
+        "streamable_http_path": config.mcp_path,
+    }
 
     if config.oauth.enabled:
         from mcp.server.auth.settings import AuthSettings

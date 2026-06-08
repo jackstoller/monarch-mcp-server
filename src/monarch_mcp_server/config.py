@@ -65,6 +65,7 @@ class Config:
     transport: str
     host: str
     port: int
+    mcp_path: str
     session_store_path: Path
     read_only: bool
     rate_limit_per_minute: int
@@ -103,10 +104,18 @@ def load_config() -> Config:
 
     session_store = Path(_clean("SESSION_STORE_PATH") or "/data/monarch-session")
 
+    # Path the Streamable HTTP endpoint is served on. Default "/" (the origin),
+    # so the resource identifier, the connector URL, and the request path all
+    # coincide; set MCP_PATH=/mcp for the conventional sub-path instead.
+    mcp_path = _clean("MCP_PATH") or "/"
+    if not mcp_path.startswith("/"):
+        mcp_path = "/" + mcp_path
+
     return Config(
         transport=transport,
         host=_clean("HOST") or "0.0.0.0",
         port=port,
+        mcp_path=mcp_path,
         session_store_path=session_store,
         read_only=_bool("READ_ONLY", True),
         rate_limit_per_minute=rate_limit,
