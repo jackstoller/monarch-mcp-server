@@ -36,20 +36,30 @@ _ALLOWED_ALGS = ["RS256", "RS384", "RS512", "ES256", "ES384", "ES512"]
 
 
 def _parse_scopes(claims: dict[str, Any]) -> list[str]:
-    """Extract granted scopes from a token.
+    """Extract granted scopes/permissions from a token.
 
-    Different IdPs encode scopes differently: OAuth's ``scope`` is a
-    space-delimited string (Auth0, Zitadel); some use a ``scp`` array.
+    Different IdPs encode authorization differently:
+      * ``scope`` -- space-delimited string (standard OAuth; Auth0, Zitadel)
+      * ``scp``   -- array or string (some IdPs)
+      * ``permissions`` -- array (Auth0 RBAC "Add Permissions in the Access
+        Token"); semantically equivalent to scopes for our gating.
+    We merge all of them so the read/write gate works regardless of which the
+    IdP emits.
     """
+    out: list[str] = []
     scope = claims.get("scope")
     if isinstance(scope, str):
-        return scope.split()
+        out.extend(scope.split())
     scp = claims.get("scp")
     if isinstance(scp, list):
-        return [str(s) for s in scp]
-    if isinstance(scp, str):
-        return scp.split()
-    return []
+        out.extend(str(s) for s in scp)
+    elif isinstance(scp, str):
+        out.extend(scp.split())
+    perms = claims.get("permissions")
+    if isinstance(perms, list):
+        out.extend(str(p) for p in perms)
+    # De-dup, preserve order.
+    return list(dict.fromkeys(out))
 
 
 class JwtTokenVerifier(TokenVerifier):
