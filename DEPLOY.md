@@ -14,7 +14,7 @@ Internet ──TLS──> Cloudflare ──http──> host nginx :80 ──> 12
                   (monarch-mcp.jackstoller.com)              │ (monarch-mcp container)
                                                              ├── /healthz  (public)
                                                              ├── /.well-known/oauth-protected-resource
-                                                             └── /mcp  (Bearer JWT required)
+                                                             └── /     (MCP; Bearer JWT required)
 ```
 
 ## One-time server setup

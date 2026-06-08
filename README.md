@@ -193,7 +193,9 @@ HTTP on `$PORT`. The public URL is HTTPS.
 
 Key endpoints (HTTP mode):
 
-- `POST /mcp` — the MCP Streamable HTTP endpoint (requires `Bearer` token).
+- `POST /` — the MCP Streamable HTTP endpoint (requires `Bearer` token). Served
+  at the origin root by default (`MCP_PATH=/`) so it matches the resource id and
+  the connector URL; set `MCP_PATH=/mcp` for a sub-path.
 - `GET /.well-known/oauth-protected-resource` — RFC 9728 Protected Resource
   Metadata, advertising your IdP as the authorization server and this server's
   own resource id.
@@ -304,7 +306,8 @@ failure mode — the `aud` in issued tokens must **exactly** equal `OAUTH_AUDIEN
 ### 5. Add to Claude as a custom connector
 
 1. In the Claude app: **Settings → Connectors → Add custom connector**.
-2. **URL**: `https://monarch-mcp.example.com/mcp`.
+2. **URL**: `https://monarch-mcp.example.com` (the bare origin — the server
+   serves MCP at `/` by default; Claude posts to the connector origin).
 3. Claude fetches `/.well-known/oauth-protected-resource`, discovers your IdP,
    and starts the OAuth login. If your IdP supports **Dynamic Client
    Registration**, no client setup is needed. Otherwise open **Advanced
