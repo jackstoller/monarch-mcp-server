@@ -1,0 +1,41 @@
+# Monarch MCP Server -- remote, OAuth-protected Streamable HTTP service.
+#
+# TLS terminates at your existing ingress/reverse proxy; this container serves
+# plain HTTP on $PORT. Point your proxy at it and expose it as the HTTPS
+# PUBLIC_URL you configured in .env.
+#
+# Kubernetes deltas (see README for full manifests):
+#   * This service  -> a Deployment (1 replica; rate limiting is per-process).
+#   * monarch-session volume -> a PersistentVolumeClaim (ReadWriteOnce) mounted
+#     at /data, with SESSION_STORE_PATH=/data/monarch-session.
+#   * .env           -> a Secret (creds, OAuth) + ConfigMap (non-secret config),
+#     referenced via envFrom.
+#   * ports/healthz  -> a Service (ClusterIP) + readiness/liveness probes on
+#     GET /healthz; TLS via an Ingress.
+
+services:
+  monarch-mcp:
+    build: .
+    image: monarch-mcp-server:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Container defaults (override in .env as needed).
+      TRANSPORT: http
+      PORT: "8000"
+      SESSION_STORE_PATH: /data/monarch-session
+    ports:
+      - "127.0.0.1:8000:8000"  # bind to localhost; the reverse proxy fronts it
+    volumes:
+      - monarch-session:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  monarch-session:
+    # Named volume persists the Monarch session token across restarts.

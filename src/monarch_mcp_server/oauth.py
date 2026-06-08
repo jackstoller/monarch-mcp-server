@@ -59,7 +59,13 @@ class JwtTokenVerifier(TokenVerifier):
         if not oauth.enabled:  # pragma: no cover - guarded by caller
             raise ValueError("OAuth is not fully configured; cannot build verifier")
         self._issuer = oauth.issuer
-        self._audience = oauth.resource_id
+        # Accept the configured audience with and without a trailing slash. The
+        # SDK's RFC 9728 metadata route normalises the resource id to a trailing
+        # slash; without this, a token whose `aud` matches the IdP's API
+        # identifier (no slash) but not the advertised resource would be
+        # rejected. PyJWT passes if the token's aud matches ANY entry.
+        raw_aud = oauth.resource_id or ""
+        self._audience = list({raw_aud, raw_aud.rstrip("/"), raw_aud.rstrip("/") + "/"})
         # PyJWKClient fetches the JWKS lazily and caches keys (with its own
         # lifespan + LRU), so signing keys are not re-fetched on every request.
         self._jwks_client = PyJWKClient(
