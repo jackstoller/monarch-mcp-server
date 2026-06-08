@@ -18,9 +18,22 @@ logger = logging.getLogger(__name__)
 KEYRING_SERVICE = "com.mcp.monarch-mcp-server"
 KEYRING_USERNAME = "monarch-token"
 
-# File-based fallback location
-_TOKEN_DIR = Path.home() / ".monarch-mcp-server"
-_TOKEN_FILE = _TOKEN_DIR / "token"
+# File-based fallback location.
+#
+# In a container there is usually no keyring backend, so this file store is the
+# primary persistence mechanism. ``SESSION_STORE_PATH`` (default
+# ``/data/monarch-session``, a mounted volume) points at the token file so the
+# Monarch session survives cold starts. When unset we fall back to the per-user
+# home directory used by the original stdio install.
+def _resolve_token_file() -> Path:
+    configured = os.getenv("SESSION_STORE_PATH")
+    if configured and configured.strip():
+        return Path(configured.strip())
+    return Path.home() / ".monarch-mcp-server" / "token"
+
+
+_TOKEN_FILE = _resolve_token_file()
+_TOKEN_DIR = _TOKEN_FILE.parent
 
 
 def _keyring_available() -> bool:
