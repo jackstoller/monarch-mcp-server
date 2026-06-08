@@ -26,7 +26,9 @@ services:
       PORT: "8000"
       SESSION_STORE_PATH: /data/monarch-session
     ports:
-      - "127.0.0.1:8000:8000"  # bind to localhost; the reverse proxy fronts it
+      # Bind to localhost; the host reverse proxy (nginx) fronts it. HOST_PORT
+      # picks the loopback port to avoid clashing with other containers.
+      - "127.0.0.1:${HOST_PORT:-8000}:8000"
     volumes:
       - monarch-session:/data
     healthcheck:
