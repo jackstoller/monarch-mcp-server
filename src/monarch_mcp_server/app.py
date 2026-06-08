@@ -11,11 +11,12 @@ serves plain HTTP.
 """
 
 import logging
+from pathlib import Path
 
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 
 from monarch_mcp_server.config import config
 
@@ -68,6 +69,24 @@ mcp = _build_fastmcp()
 async def healthz(_request: Request) -> JSONResponse:
     """Unauthenticated liveness probe (not part of the MCP protocol)."""
     return JSONResponse({"status": "ok"})
+
+
+# Serve a favicon at the connector origin so clients (e.g. the Claude app) show
+# this server's icon instead of falling back to the registrable domain's. Public
+# and cacheable; not part of the MCP protocol.
+_FAVICON_PATH = Path(__file__).parent / "static" / "favicon.ico"
+_FAVICON_BYTES = _FAVICON_PATH.read_bytes() if _FAVICON_PATH.is_file() else b""
+
+
+@mcp.custom_route("/favicon.ico", methods=["GET"])
+async def favicon(_request: Request) -> Response:
+    if not _FAVICON_BYTES:
+        return Response(status_code=404)
+    return Response(
+        content=_FAVICON_BYTES,
+        media_type="image/x-icon",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 # Import tools package to trigger tool registration (read tools via @mcp.tool(),

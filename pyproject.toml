@@ -54,6 +54,9 @@ monarch-mcp-server = "monarch_mcp_server.server:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+monarch_mcp_server = ["static/*"]
+
 [tool.black]
 line-length = 88
 target-version = ['py312']
