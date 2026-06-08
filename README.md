@@ -164,6 +164,189 @@ Once authenticated, use these tools directly in Claude Desktop or Claude Code:
 - `get_budgets` - Budget information and spending
 - `get_cashflow` - Income/expense analysis
 
+## 🌐 Remote Deployment (OAuth-protected HTTP)
+
+The server also runs as a **remote, public HTTPS MCP service** you can add to the
+Claude app (iOS/Android/web) as a custom connector. In this mode it speaks the
+**Streamable HTTP** transport and acts as an **OAuth 2.0 Resource Server**: it
+validates bearer JWTs issued by *your* Identity Provider (Auth0 or Zitadel) and
+never hosts the login flow itself. Claude logs the user in against the IdP.
+
+```
+Claude app ──(OAuth login)──▶ Your IdP (Auth0 / Zitadel)
+    │                              │ issues JWT (aud = this server)
+    └──(MCP + Bearer JWT)──▶ Reverse proxy (TLS) ──▶ monarch-mcp container (HTTP)
+                                                         └─ validates iss/aud/exp/sig
+                                                         └─ calls Monarch with a
+                                                            headless session
+```
+
+TLS terminates at **your** ingress/reverse proxy; the container serves plain
+HTTP on `$PORT`. The public URL is HTTPS.
+
+### Architecture / transports
+
+| `TRANSPORT` | Use | Auth |
+|-------------|-----|------|
+| `stdio` (code default) | Claude Desktop/Code, `mcp run` | none (local) |
+| `http` (container default) | Remote custom connector | OAuth 2.0 bearer JWT |
+
+Key endpoints (HTTP mode):
+
+- `POST /mcp` — the MCP Streamable HTTP endpoint (requires `Bearer` token).
+- `GET /.well-known/oauth-protected-resource` — RFC 9728 Protected Resource
+  Metadata, advertising your IdP as the authorization server and this server's
+  own resource id.
+- `GET /healthz` — unauthenticated liveness probe.
+
+On every MCP request the server requires a `Bearer` token and validates: the JWT
+signature against the IdP JWKS (fetched + cached from `OAUTH_JWKS_URI`),
+`iss == OAUTH_ISSUER`, `aud == OAUTH_AUDIENCE` (this server's resource id), and
+`exp`/`nbf`. On failure it returns `401` with a `WWW-Authenticate` header
+pointing at the resource metadata, so Claude knows where to authenticate.
+
+### 1. Deploy with Docker Compose
+
+```bash
+cp .env.example .env       # then edit — see variables below
+docker compose up -d --build
+curl -fsS http://127.0.0.1:8000/healthz   # -> {"status":"ok"}
+```
+
+Front the container with your existing reverse proxy (Caddy/Nginx/Traefik),
+terminating TLS and proxying `https://monarch-mcp.example.com` → the container's
+`:8000`. Set `PUBLIC_URL`/`OAUTH_AUDIENCE` to that HTTPS URL.
+
+The named `monarch-session` volume persists the Monarch session token across
+restarts. Headless login (below) populates it on first use.
+
+### 2. Environment variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `TRANSPORT` | `stdio` (code) / `http` (container) | `stdio` or `http` |
+| `PORT` | `8000` | HTTP port (plain HTTP behind your proxy) |
+| `HOST` | `0.0.0.0` | Bind address |
+| `RATE_LIMIT_PER_MINUTE` | `120` | Per-IP request budget (`0` disables); `/healthz` exempt |
+| `MONARCH_EMAIL` / `MONARCH_PASSWORD` | — | Headless Monarch login |
+| `MONARCH_MFA_SECRET` | — | Base32 TOTP secret for non-interactive MFA |
+| `SESSION_STORE_PATH` | `/data/monarch-session` | Persisted session token path (mounted volume) |
+| `OAUTH_ISSUER` | — | Token `iss` (exact, trailing slash matters) |
+| `OAUTH_AUDIENCE` | `PUBLIC_URL` | **This server's resource id** = required token `aud` |
+| `OAUTH_JWKS_URI` | — | IdP JWKS endpoint for signature verification |
+| `REQUIRED_READ_SCOPE` | `monarch:read` | Scope required on every request |
+| `REQUIRED_WRITE_SCOPE` | `monarch:write` | Scope required for mutating tools |
+| `READ_ONLY` | `true` | When true, mutating tools are not registered |
+| `PUBLIC_URL` | — | Public HTTPS URL (RFC 9728 metadata) |
+
+> **Leaving `OAUTH_*` blank runs the server unauthenticated** (a warning is
+> logged). Only do that for local/stdio development — never expose it publicly.
+
+### 3. Headless Monarch login
+
+In a container there is no browser, so the server logs in non-interactively:
+
+1. On the first tool call it tries the persisted session at `SESSION_STORE_PATH`.
+2. If absent/expired, it logs in with `MONARCH_EMAIL` / `MONARCH_PASSWORD`,
+   completing MFA automatically using a TOTP code derived from
+   `MONARCH_MFA_SECRET` (via `pyotp`).
+3. The resulting session token is persisted and reused across cold starts;
+   expiry triggers an automatic re-login.
+
+To obtain `MONARCH_MFA_SECRET`: in Monarch, set up an **authenticator app** for
+two-factor auth and use the **manual entry / setup key** (a Base32 string) shown
+next to the QR code. Startup never blocks on auth — if Monarch auth is
+unavailable, individual tool calls return a clear error instead.
+
+### 4. Identity Provider setup
+
+You define **one API/resource** (its identifier becomes `OAUTH_AUDIENCE`) and
+**two scopes**: `monarch:read` and `monarch:write`. Audience mismatch is the #1
+failure mode — the `aud` in issued tokens must **exactly** equal `OAUTH_AUDIENCE`.
+
+#### Auth0
+
+1. **APIs → Create API**
+   - *Identifier (audience)*: `https://monarch-mcp.example.com` — set this as
+     `OAUTH_AUDIENCE`.
+   - Signing algorithm: **RS256**.
+   - Enable **RBAC** and **Add Permissions in the Access Token**.
+2. **Permissions** tab on the API: add `monarch:read` and `monarch:write`.
+3. Discover the rest from the tenant:
+   - `OAUTH_ISSUER`  = `https://YOUR_TENANT.us.auth0.com/` (note trailing slash).
+   - `OAUTH_JWKS_URI` = `https://YOUR_TENANT.us.auth0.com/.well-known/jwks.json`.
+4. **Dynamic Client Registration**: Auth0 supports DCR but it is **off by
+   default**. Either enable it (`PATCH /api/v2/tenants/settings` with
+   `enabled_clients`/`flags.enable_dynamic_client_registration`), or create a
+   **Regular Web Application**, grant it the two scopes, and paste its
+   **Client ID/Secret** into Claude's connector *Advanced settings* (see §5).
+
+#### Zitadel
+
+1. **Create a Project**; inside it **Create an API application** (auth method
+   *JWT (Private Key)* or *Basic* — only the resource matters for the RS).
+2. The API's resource identifier / audience is typically the **Project ID** or a
+   configured URN. Set `OAUTH_AUDIENCE` to the value Zitadel places in the
+   token's `aud` (verify with a test token). Add an **Audience** action/claim if
+   you need it to equal `https://monarch-mcp.example.com`.
+3. **Roles**: add project roles `monarch:read` and `monarch:write`; map them into
+   the token as scopes/claims (Zitadel can emit them in `scope`).
+4. Discovery:
+   - `OAUTH_ISSUER`  = `https://your-instance.zitadel.cloud` (your instance URL).
+   - `OAUTH_JWKS_URI` = `https://your-instance.zitadel.cloud/oauth/v2/keys`.
+5. **DCR**: Zitadel exposes OIDC discovery; if the connector cannot self-register,
+   create an application and paste its Client ID/Secret into Claude (see §5).
+
+> **Verifying the audience**: decode a test access token (jwt.io) and confirm
+> `aud` exactly equals `OAUTH_AUDIENCE`. A trailing-slash difference vs. the
+> advertised resource id is tolerated by the verifier; a different value is not.
+
+### 5. Add to Claude as a custom connector
+
+1. In the Claude app: **Settings → Connectors → Add custom connector**.
+2. **URL**: `https://monarch-mcp.example.com/mcp`.
+3. Claude fetches `/.well-known/oauth-protected-resource`, discovers your IdP,
+   and starts the OAuth login. If your IdP supports **Dynamic Client
+   Registration**, no client setup is needed. Otherwise open **Advanced
+   settings** and paste the **OAuth Client ID** (and **Client Secret** if your
+   IdP requires one) you created above.
+4. Log in at your IdP, consenting to `monarch:read` (and `monarch:write` if you
+   run with `READ_ONLY=false`).
+
+### 6. Kubernetes notes
+
+The Compose service maps to:
+
+- **Deployment** (1 replica — rate limiting is per-process/in-memory; for
+  multiple replicas enforce limits at the Ingress instead).
+- **PersistentVolumeClaim** (`ReadWriteOnce`) mounted at `/data`, with
+  `SESSION_STORE_PATH=/data/monarch-session`.
+- **Secret** (Monarch creds, OAuth config) + optional **ConfigMap** (non-secret
+  config), referenced via `envFrom`.
+- **Service** (ClusterIP) + **Ingress** for TLS, with readiness/liveness probes
+  on `GET /healthz`.
+
+### Security notes
+
+- **Read-only by default** (`READ_ONLY=true`): mutating tools are not registered
+  at all. Set `READ_ONLY=false` to enable them; they then additionally require
+  the `monarch:write` scope in the caller's token.
+- Tokens, credentials, and full financial payloads are **never logged**.
+- Basic per-IP rate limiting protects a single instance (`RATE_LIMIT_PER_MINUTE`).
+- The container runs as a **non-root** user.
+- Asymmetric JWT algorithms only (RS/ES); `none`/HMAC are rejected.
+
+### Design tradeoffs (SDK vs. MCP auth spec)
+
+- The installed MCP SDK (`mcp` 1.27.x) already implements the Resource Server
+  pieces of the 2025-06-18 auth spec: a `TokenVerifier` hook, RFC 9728 metadata,
+  bearer middleware, and `401 + WWW-Authenticate`. We supply only the JWT
+  verifier (`oauth.py`) and let the SDK wire the rest — no custom ASGI auth
+  middleware was needed.
+- The SDK's `required_scopes` is enforced **globally** per request, not per
+  tool. So we require `monarch:read` globally and check `monarch:write`
+  **inside** each mutating tool using the SDK's authenticated-token contextvar.
+
 ## ✨ Features
 
 ### 📊 Account Management
