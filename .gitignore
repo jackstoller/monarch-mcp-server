@@ -93,3 +93,6 @@ logs/
 tmp/
 temp/
 .tmp/
+# Local provisioning helpers (machine-specific; reference local SSH key path)
+set-monarch-creds.bat
+set-monarch-creds.ps1
