@@ -1,7 +1,6 @@
 """Central runtime configuration, read once from environment variables.
 
-Everything that controls transport, headless Monarch login, and OAuth resource
-server behaviour is resolved here so the rest of the codebase has a single,
+Everything that controls transport, storage, and OAuth server behaviour is resolved here so the rest of the codebase has a single,
 typed view of the deployment. Values are read at import time; the process is
 expected to be restarted to pick up changes (as is normal for a container).
 """
@@ -9,7 +8,7 @@ expected to be restarted to pick up changes (as is normal for a container).
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -31,33 +30,29 @@ def _clean(name: str) -> str | None:
 
 @dataclass(frozen=True)
 class OAuthConfig:
-    """OAuth 2.0 Resource Server settings (MCP auth spec, 2025-06-18).
+    """Scopes and public origin for the built-in OAuth authorization server.
 
-    The server is a Resource Server only: it validates bearer JWTs issued by an
-    external IdP and never runs an authorization flow itself.
+    This app is its own identity provider (see ``provider.py``): users sign up on
+    the web UI, and MCP clients (e.g. Claude) obtain opaque bearer tokens via
+    OAuth 2.1 + PKCE. There is no external IdP dependency.
     """
 
-    issuer: str | None
-    audience: str | None
-    jwks_uri: str | None
     read_scope: str
     write_scope: str
     public_url: str | None
-
-    @property
-    def enabled(self) -> bool:
-        """OAuth enforcement is active only when fully configured.
-
-        Missing config means local/stdio development: we do not silently run an
-        unauthenticated public server, but we also do not block stdio usage.
-        """
-        return bool(self.issuer and self.audience and self.jwks_uri)
+    enabled: bool  # True for the HTTP transport; stdio is a local single-user mode
 
     @property
     def resource_id(self) -> str | None:
-        """The resource identifier advertised in RFC 9728 metadata and required
-        as the JWT ``aud``. Defaults to the audience (this server's public URL)."""
-        return self.audience or self.public_url
+        """The MCP endpoint URL (resource indicator advertised in RFC 9728)."""
+        if not self.public_url:
+            return None
+        return self.public_url.rstrip("/") + config_mcp_path()
+
+
+def config_mcp_path() -> str:
+    path = _clean("MCP_PATH") or "/mcp"
+    return path if path.startswith("/") else "/" + path
 
 
 @dataclass(frozen=True)
@@ -69,21 +64,21 @@ class Config:
     session_store_path: Path
     read_only: bool
     rate_limit_per_minute: int
-    oauth: OAuthConfig = field(default_factory=lambda: load_oauth())
+    data_dir: Path
+    allow_signup: bool
+    oauth: OAuthConfig
 
     @property
     def is_http(self) -> bool:
         return self.transport == "http"
 
 
-def load_oauth() -> OAuthConfig:
+def load_oauth(transport: str) -> OAuthConfig:
     return OAuthConfig(
-        issuer=_clean("OAUTH_ISSUER"),
-        audience=_clean("OAUTH_AUDIENCE") or _clean("PUBLIC_URL"),
-        jwks_uri=_clean("OAUTH_JWKS_URI"),
         read_scope=_clean("REQUIRED_READ_SCOPE") or "monarch:read",
         write_scope=_clean("REQUIRED_WRITE_SCOPE") or "monarch:write",
         public_url=_clean("PUBLIC_URL"),
+        enabled=transport == "http",
     )
 
 
@@ -104,12 +99,10 @@ def load_config() -> Config:
 
     session_store = Path(_clean("SESSION_STORE_PATH") or "/data/monarch-session")
 
-    # Path the Streamable HTTP endpoint is served on. Default "/" (the origin),
-    # so the resource identifier, the connector URL, and the request path all
-    # coincide; set MCP_PATH=/mcp for the conventional sub-path instead.
-    mcp_path = _clean("MCP_PATH") or "/"
-    if not mcp_path.startswith("/"):
-        mcp_path = "/" + mcp_path
+    # The origin serves the web UI; the MCP endpoint lives at a sub-path.
+    mcp_path = config_mcp_path()
+    if mcp_path == "/":
+        raise ValueError("MCP_PATH must not be '/': the root serves the web UI")
 
     return Config(
         transport=transport,
@@ -119,7 +112,11 @@ def load_config() -> Config:
         session_store_path=session_store,
         read_only=_bool("READ_ONLY", True),
         rate_limit_per_minute=rate_limit,
-        oauth=load_oauth(),
+        data_dir=Path(_clean("DATA_DIR") or "/data"),
+        # The first account (the admin) can always sign up; further sign-ups
+        # need ALLOW_SIGNUP=true so a public URL is not an open registration.
+        allow_signup=_bool("ALLOW_SIGNUP", False),
+        oauth=load_oauth(transport),
     )
 
 

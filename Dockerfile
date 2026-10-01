@@ -8,7 +8,7 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     TRANSPORT=http \
     PORT=8000 \
-    SESSION_STORE_PATH=/data/monarch-session
+    DATA_DIR=/data
 
 WORKDIR /app
 
@@ -21,7 +21,7 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 RUN pip install --no-cache-dir .
 
-# Non-root user; /data is a mounted volume for the persisted Monarch session.
+# Non-root user; /data is a mounted volume (SQLite DB + key file).
 RUN useradd --create-home --uid 10001 appuser \
     && mkdir -p /data \
     && chown -R appuser:appuser /data

@@ -17,6 +17,15 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 
+def client_ip_of(request: Request) -> str:
+    """Best-effort client identity: Cloudflare's CF-Connecting-IP (unforgeable
+    behind CF), else the immediate peer. Never X-Forwarded-For (spoofable)."""
+    ip = request.headers.get("cf-connecting-ip")
+    if not ip:
+        ip = request.client.host if request.client else "unknown"
+    return ip
+
+
 class RateLimitMiddleware:
     """ASGI middleware enforcing a per-IP request budget each minute."""
 
@@ -42,9 +51,7 @@ class RateLimitMiddleware:
         # CF-Connecting-IP is set (and overwritten) by Cloudflare, which fronts
         # all public traffic, so it cannot be forged by the client. Fall back to
         # the immediate peer when present (direct/local access).
-        client_ip = request.headers.get("cf-connecting-ip")
-        if not client_ip:
-            client_ip = request.client.host if request.client else "unknown"
+        client_ip = client_ip_of(request)
 
         now_window = int(time.time() // 60)
         if now_window != self._window:

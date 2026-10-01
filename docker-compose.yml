@@ -1,4 +1,4 @@
-# Monarch MCP Server -- remote, OAuth-protected Streamable HTTP service.
+# Monarch MCP Server -- self-hosted multi-user web UI + OAuth-protected MCP service.
 #
 # TLS terminates at your existing ingress/reverse proxy; this container serves
 # plain HTTP on $PORT. Point your proxy at it and expose it as the HTTPS
@@ -6,8 +6,8 @@
 #
 # Kubernetes deltas (see README for full manifests):
 #   * This service  -> a Deployment (1 replica; rate limiting is per-process).
-#   * monarch-session volume -> a PersistentVolumeClaim (ReadWriteOnce) mounted
-#     at /data, with SESSION_STORE_PATH=/data/monarch-session.
+#   * monarch-data volume -> a PersistentVolumeClaim (ReadWriteOnce) mounted
+#     at /data (SQLite DB + key file).
 #   * .env           -> a Secret (creds, OAuth) + ConfigMap (non-secret config),
 #     referenced via envFrom.
 #   * ports/healthz  -> a Service (ClusterIP) + readiness/liveness probes on
@@ -24,13 +24,13 @@ services:
       # Container defaults (override in .env as needed).
       TRANSPORT: http
       PORT: "8000"
-      SESSION_STORE_PATH: /data/monarch-session
+      DATA_DIR: /data
     ports:
       # Bind to localhost; the host reverse proxy (nginx) fronts it. HOST_PORT
       # picks the loopback port to avoid clashing with other containers.
       - "127.0.0.1:${HOST_PORT:-8000}:8000"
     volumes:
-      - monarch-session:/data
+      - monarch-data:/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz').status==200 else 1)"]
       interval: 30s
@@ -39,5 +39,5 @@ services:
       start_period: 10s
 
 volumes:
-  monarch-session:
-    # Named volume persists the Monarch session token across restarts.
+  monarch-data:
+    # Named volume persists users, encrypted Monarch connections and OAuth state.

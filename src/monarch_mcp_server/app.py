@@ -3,8 +3,9 @@
 Supports two transports via the ``TRANSPORT`` env var:
 
 * ``stdio`` (default in code, for Claude Desktop/Code and ``mcp run``)
-* ``http``  -- Streamable HTTP bound to ``0.0.0.0:$PORT`` for remote deployment,
-  protected as an OAuth 2.0 Resource Server when OAuth env vars are configured.
+* ``http``  -- multi-user service on ``0.0.0.0:$PORT``: web UI (sign up, connect
+  Monarch, health, connector instructions) plus the MCP endpoint at ``MCP_PATH``,
+  protected by a built-in OAuth 2.1 authorization server (no external IdP).
 
 TLS is expected to terminate at an upstream ingress/reverse proxy; this process
 serves plain HTTP.
@@ -29,33 +30,42 @@ load_dotenv()
 
 
 def _build_fastmcp() -> FastMCP:
-    """Construct the FastMCP instance, wiring OAuth resource-server protection
-    when the OAuth env vars are present."""
+    """Construct the FastMCP instance. In HTTP mode this app is its own OAuth
+    authorization server (see ``provider.py``) and serves the web UI."""
     kwargs: dict = {
         "host": config.host,
         "port": config.port,
         "streamable_http_path": config.mcp_path,
     }
 
-    if config.oauth.enabled:
-        from mcp.server.auth.settings import AuthSettings
+    if config.is_http:
+        from mcp.server.auth.settings import (
+            AuthSettings,
+            ClientRegistrationOptions,
+            RevocationOptions,
+        )
 
-        from monarch_mcp_server.oauth import JwtTokenVerifier
+        from monarch_mcp_server.provider import MonarchOAuthProvider, allowed_scopes
 
+        if not config.oauth.public_url:
+            raise RuntimeError(
+                "PUBLIC_URL must be set for the HTTP transport (e.g. "
+                "https://monarch.example.com); it is the OAuth issuer."
+            )
         # required_scopes is enforced on EVERY request by the SDK middleware, so
         # we require only the read scope globally; the write scope is checked
         # per-tool in security.py.
-        kwargs["token_verifier"] = JwtTokenVerifier(config.oauth)
+        kwargs["auth_server_provider"] = MonarchOAuthProvider()
         kwargs["auth"] = AuthSettings(
-            issuer_url=config.oauth.issuer,
+            issuer_url=config.oauth.public_url,
             resource_server_url=config.oauth.resource_id,
             required_scopes=[config.oauth.read_scope],
-        )
-    elif config.is_http:
-        logger.warning(
-            "TRANSPORT=http but OAuth is not configured (OAUTH_ISSUER/"
-            "OAUTH_AUDIENCE/OAUTH_JWKS_URI). The server will run UNAUTHENTICATED. "
-            "Set the OAuth vars before exposing this publicly."
+            client_registration_options=ClientRegistrationOptions(
+                enabled=True,
+                valid_scopes=allowed_scopes(),
+                default_scopes=allowed_scopes(),
+            ),
+            revocation_options=RevocationOptions(enabled=True),
         )
 
     return FastMCP("Monarch Money MCP Server", **kwargs)
@@ -89,6 +99,11 @@ async def favicon(_request: Request) -> Response:
     )
 
 
+if config.is_http:
+    from monarch_mcp_server.web import register_routes
+
+    register_routes(mcp)
+
 # Import tools package to trigger tool registration (read tools via @mcp.tool(),
 # write tools via security.write_tool()). Imported after `mcp` exists.
 import monarch_mcp_server.tools  # noqa: E402, F401
@@ -100,10 +115,10 @@ app = mcp
 def main() -> None:
     """Main entry point for the server."""
     logger.info(
-        "Starting Monarch Money MCP Server (transport=%s, read_only=%s, oauth=%s)",
+        "Starting Monarch Money MCP Server (transport=%s, read_only=%s, signup=%s)",
         config.transport,
         config.read_only,
-        config.oauth.enabled,
+        config.allow_signup,
     )
     try:
         if config.is_http:
@@ -115,11 +130,12 @@ def main() -> None:
         raise
 
 
-def _run_http() -> None:
-    """Serve the Streamable HTTP app with optional rate limiting."""
-    import uvicorn
+def build_http_app():
+    """The Starlette app: MCP endpoint, OAuth server, web UI, hardening."""
+    from monarch_mcp_server.web import SecurityHeaders
 
     starlette_app = mcp.streamable_http_app()
+    starlette_app.add_middleware(SecurityHeaders)
 
     if config.rate_limit_per_minute > 0:
         from monarch_mcp_server.ratelimit import RateLimitMiddleware
@@ -128,6 +144,14 @@ def _run_http() -> None:
             RateLimitMiddleware,
             limit_per_minute=config.rate_limit_per_minute,
         )
+    return starlette_app
+
+
+def _run_http() -> None:
+    """Serve the HTTP app with uvicorn."""
+    import uvicorn
+
+    starlette_app = build_http_app()
 
     logger.info(
         "Streamable HTTP listening on %s:%s%s",

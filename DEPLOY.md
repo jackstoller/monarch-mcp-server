@@ -12,9 +12,10 @@ entrypoint — so "one container bound to 127.0.0.1" is exactly the design.
 ```
 Internet ──TLS──> Cloudflare ──http──> host nginx :80 ──> 127.0.0.1:${HOST_PORT}
                   (monarch-mcp.jackstoller.com)              │ (monarch-mcp container)
-                                                             ├── /healthz  (public)
-                                                             ├── /.well-known/oauth-protected-resource
-                                                             └── /     (MCP; Bearer JWT required)
+                                                             ├── /            web UI (sign in/up, dashboard)
+                                                             ├── /healthz     (public)
+                                                             ├── /authorize /token /register /revoke   (built-in OAuth)
+                                                             └── /mcp         (MCP; Bearer token required)
 ```
 
 ## One-time server setup
@@ -32,17 +33,18 @@ Internet ──TLS──> Cloudflare ──http──> host nginx :80 ──> 12
    ```
    Set at least:
    - `TRANSPORT=http`, `HOST_PORT=8100` (a free loopback port on this host)
-   - `PUBLIC_URL` / `OAUTH_AUDIENCE` = `https://monarch-mcp.jackstoller.com`
-   - `OAUTH_ISSUER=https://jackstoller.us.auth0.com/`
-   - `OAUTH_JWKS_URI=https://jackstoller.us.auth0.com/.well-known/jwks.json`
-   - `MONARCH_EMAIL` / `MONARCH_PASSWORD` / `MONARCH_MFA_SECRET`
-   - `READ_ONLY=true`
+   - `PUBLIC_URL=https://monarch-mcp.jackstoller.com` (must be https; it is the OAuth issuer)
+   - `SECRET_KEY` -- encrypts stored Monarch credentials (`python -c "import secrets; print(secrets.token_urlsafe(48))"`). Back it up.
+   - `ALLOW_SIGNUP=false` (only the first account can register) and `READ_ONLY=true`
+   - No Auth0 / IdP settings and no `MONARCH_*` credentials: users sign up on the
+     web UI and connect their own Monarch account on the dashboard.
 
 3. **First boot:**
    ```bash
    sudo docker compose build
    sudo docker compose up -d
    curl -fsS http://127.0.0.1:8100/healthz   # -> {"status":"ok"}
+   # then open PUBLIC_URL, sign up (first account = admin), connect Monarch
    ```
 
 4. **nginx vhost** at `/etc/nginx/conf.d/monarch-mcp.jackstoller.com.conf`:
