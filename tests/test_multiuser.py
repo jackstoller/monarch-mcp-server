@@ -93,6 +93,18 @@ def test_retire_pair_keeps_refresh_briefly(store):
     assert row and row["expires"] <= time.time() + store_mod.REFRESH_GRACE + 1
 
 
+def test_scopes_granted_follow_read_only(monkeypatch):
+    import dataclasses
+    from monarch_mcp_server import provider
+
+    base = provider.config
+    monkeypatch.setattr(provider, "config", dataclasses.replace(base, read_only=False))
+    assert provider.clamp_scopes(["monarch:read"]) == ["monarch:read", "monarch:write"]
+    assert provider.clamp_scopes(None) == ["monarch:read", "monarch:write"]
+    monkeypatch.setattr(provider, "config", dataclasses.replace(base, read_only=True))
+    assert provider.clamp_scopes(["monarch:read", "monarch:write"]) == ["monarch:read"]
+
+
 def test_expired_session_rejected(store):
     sid, _ = store.create_session(None)
     assert store.get_session(sid)

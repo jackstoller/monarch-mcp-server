@@ -37,12 +37,14 @@ def allowed_scopes() -> list[str]:
 
 
 def clamp_scopes(requested: list[str] | None) -> list[str]:
-    """Intersect with what this deployment offers; always include read."""
-    allowed = allowed_scopes()
-    granted = [s for s in (requested or allowed) if s in allowed]
-    if config.oauth.read_scope not in granted:
-        granted.insert(0, config.oauth.read_scope)
-    return list(dict.fromkeys(granted))
+    """Grant every scope this deployment offers, whatever was requested.
+
+    Clients (e.g. Claude) request scopes from the protected-resource metadata,
+    which the SDK limits to the globally required read scope, so honouring the
+    request would leave connectors read-only even with writes enabled. Access
+    is governed by READ_ONLY plus the consent screen, which lists these scopes.
+    """
+    return allowed_scopes()
 
 
 class MonarchOAuthProvider:
@@ -149,13 +151,13 @@ class MonarchOAuthProvider:
         row = store.get_token(refresh_token.token, "refresh")
         if not row:
             raise TokenError("invalid_grant", "refresh token is no longer valid")
-        if scopes and not set(scopes) <= set(refresh_token.scopes):
-            raise TokenError("invalid_scope", "cannot widen scope on refresh")
         store.retire_pair(row["pair_id"])  # rotate; short grace for retries
+        # Re-derive from current config (not the old grant) so tokens follow
+        # READ_ONLY changes: enabling writes upgrades connectors on next refresh.
         return self._mint(
             row["user_id"],
             row["client_id"],
-            scopes or refresh_token.scopes,
+            clamp_scopes(scopes),
             row["resource"],
         )
 
